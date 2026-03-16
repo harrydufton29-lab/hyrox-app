@@ -433,7 +433,7 @@ body{background:var(--bg0);color:var(--txt);font-family:'Barlow',sans-serif;min-
 <body>
 
 <!-- ═══ AUTH OVERLAY ═══ -->
-<div class="auth-overlay" id="authOverlay">
+<div class="auth-overlay hidden" id="authOverlay">
   <div class="auth-box">
     <div class="auth-logo">HYR<span>OX</span>.AI</div>
     <div class="auth-tagline">Personal Training Coach</div>
@@ -2908,225 +2908,28 @@ window.addEventListener('load', function() {
 
   // Register auth state listener (must be after sb is initialised)
   sb.auth.onAuthStateChange(async function(event, session) {
-    console.log('Auth event:', event);
-    if(event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION'){
-      if(session && session.user){
-        currentUser = session.user;
-        updateSidebarUser(currentUser);
-        const overlay = document.getElementById('authOverlay');
-        if(overlay) overlay.classList.add('hidden');
-        await _loadAnalysis();
-        await _loadAllUserData();
-        renderProfilePage();
-      }
-    } else if(event === 'SIGNED_OUT'){
+    console.log('Auth event:', event, session ? 'has session' : 'no session');
+    const overlay = document.getElementById('authOverlay');
+
+    if(session && session.user){
+      // User is logged in — hide overlay and load their data
+      currentUser = session.user;
+      updateSidebarUser(currentUser);
+      if(overlay) overlay.classList.add('hidden');
+      await _loadAnalysis();
+      await _loadAllUserData();
+      renderProfilePage();
+    } else {
+      // No session — show login screen
       currentUser = null;
       sessionLog = [];
       G = {};
       updateSidebarUser(null);
-      const overlay = document.getElementById('authOverlay');
       if(overlay) overlay.classList.remove('hidden');
       renderDashboard();
     }
   });
 });
-
-
-
-
-
-
-
-// ══════════════════════════════════════════════════════════
-// PROFILE PAGE
-// ══════════════════════════════════════════════════════════
-
-function renderProfilePage(){
-  if(!currentUser) return;
-  // Name + email
-  const meta = currentUser.user_metadata || {};
-  const name = meta.name || meta.display_name || '';
-  const email = currentUser.email || '';
-  const created = currentUser.created_at ? new Date(currentUser.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'}) : '';
-
-  const nameEl = document.getElementById('profileNameDisplay');
-  const emailEl = document.getElementById('profileEmailDisplay');
-  const joinedEl = document.getElementById('profileJoined');
-  const nameInput = document.getElementById('profileNameInput');
-  const avatarInitial = document.getElementById('profileAvatarInitial');
-
-  if(nameEl) nameEl.textContent = name || email.split('@')[0];
-  if(emailEl) emailEl.textContent = email;
-  if(joinedEl) joinedEl.textContent = created ? 'Member since ' + created : '';
-  if(nameInput) nameInput.value = name;
-  if(avatarInitial) avatarInitial.textContent = (name || email).slice(0,1).toUpperCase();
-
-  // Load saved profile extras from localStorage (name, race target etc)
-  const extras = JSON.parse(localStorage.getItem('hx_profile_extras')||'{}');
-  const raceTargetEl = document.getElementById('profileRaceTarget');
-  const raceDateEl = document.getElementById('profileRaceDate');
-  const clubEl = document.getElementById('profileClub');
-  if(raceTargetEl) raceTargetEl.value = extras.raceTarget || '';
-  if(raceDateEl) raceDateEl.value = extras.raceDate || '';
-  if(clubEl) clubEl.value = extras.club || '';
-
-  // Load saved avatar from localStorage
-  const savedAvatar = localStorage.getItem('hx_avatar_' + currentUser.id);
-  if(savedAvatar){
-    const img = document.getElementById('profileAvatarImg');
-    const initial = document.getElementById('profileAvatarInitial');
-    if(img){ img.src = savedAvatar; img.style.display = 'block'; }
-    if(initial) initial.style.display = 'none';
-    // Update sidebar avatar too
-    const sidebarAv = document.getElementById('userAvatar');
-    if(sidebarAv){ sidebarAv.style.backgroundImage = 'url('+savedAvatar+')'; sidebarAv.style.backgroundSize = 'cover'; sidebarAv.textContent = ''; }
-  }
-
-  refreshDbStatus();
-}
-
-async function saveProfile(){
-  if(!currentUser || !sb) return;
-  const name = document.getElementById('profileNameInput').value.trim();
-  const raceTarget = document.getElementById('profileRaceTarget').value.trim();
-  const raceDate = document.getElementById('profileRaceDate').value;
-  const club = document.getElementById('profileClub').value.trim();
-  const btn = document.getElementById('profileSaveBtn');
-
-  btn.textContent = 'Saving...';
-
-  // Update auth metadata
-  const { error } = await sb.auth.updateUser({ data: { name } });
-
-  // Save extras to localStorage
-  localStorage.setItem('hx_profile_extras', JSON.stringify({ raceTarget, raceDate, club }));
-
-  // Update Supabase profiles table
-  await sb.from('profiles').upsert({ id: currentUser.id, name });
-
-  if(error){
-    btn.textContent = 'Error — try again';
-    setTimeout(()=>{ btn.textContent = 'Save Changes'; }, 2000);
-  } else {
-    btn.textContent = '✓ Saved';
-    btn.classList.add('saved');
-    // Update sidebar and profile display
-    const nameEl = document.getElementById('profileNameDisplay');
-    if(nameEl) nameEl.textContent = name;
-    updateSidebarUser(currentUser);
-    setTimeout(()=>{ btn.textContent = 'Save Changes'; btn.classList.remove('saved'); }, 2000);
-  }
-}
-
-function handleAvatarUpload(event){
-  const file = event.target.files[0];
-  if(!file) return;
-  if(file.size > 2 * 1024 * 1024){ alert('Image must be under 2MB.'); return; }
-  const reader = new FileReader();
-  reader.onload = function(e){
-    const dataUrl = e.target.result;
-    // Save to localStorage (Supabase Storage requires paid plan)
-    if(currentUser) localStorage.setItem('hx_avatar_' + currentUser.id, dataUrl);
-    const img = document.getElementById('profileAvatarImg');
-    const initial = document.getElementById('profileAvatarInitial');
-    if(img){ img.src = dataUrl; img.style.display = 'block'; }
-    if(initial) initial.style.display = 'none';
-    // Update sidebar
-    const sidebarAv = document.getElementById('userAvatar');
-    if(sidebarAv){ sidebarAv.style.backgroundImage = 'url('+dataUrl+')'; sidebarAv.style.backgroundSize = 'cover'; sidebarAv.style.backgroundPosition = 'center'; sidebarAv.textContent = ''; }
-  };
-  reader.readAsDataURL(file);
-}
-
-async function changePassword(){
-  if(!sb) return;
-  const newPw = document.getElementById('newPassword').value;
-  const confirmPw = document.getElementById('confirmPassword').value;
-  const msgEl = document.getElementById('pwChangeMsg');
-  msgEl.style.display = 'none';
-  if(!newPw || newPw.length < 6){ msgEl.textContent = 'Password must be at least 6 characters.'; msgEl.style.color = 'var(--red)'; msgEl.style.display = 'block'; return; }
-  if(newPw !== confirmPw){ msgEl.textContent = 'Passwords do not match.'; msgEl.style.color = 'var(--red)'; msgEl.style.display = 'block'; return; }
-  const { error } = await sb.auth.updateUser({ password: newPw });
-  if(error){ msgEl.textContent = 'Error: ' + error.message; msgEl.style.color = 'var(--red)'; }
-  else { msgEl.textContent = '✓ Password updated successfully.'; msgEl.style.color = 'var(--green)'; document.getElementById('newPassword').value = ''; document.getElementById('confirmPassword').value = ''; }
-  msgEl.style.display = 'block';
-}
-
-async function refreshDbStatus(){
-  if(!sb || !currentUser){ 
-    document.getElementById('dbStatusRows').innerHTML = '<div class="db-status-row"><span style="color:var(--txt2)">Not signed in</span><span class="db-status-dot red"></span></div>';
-    return;
-  }
-  const rows = document.getElementById('dbStatusRows');
-  if(!rows) return;
-  rows.innerHTML = '<div class="db-status-row"><span style="color:var(--txt3)">Checking...</span></div>';
-
-  try {
-    // Check each table
-    const checks = [
-      { label: 'Connection', test: async()=>{ await sb.from('profiles').select('id').eq('id',currentUser.id).maybeSingle(); return true; }},
-      { label: 'Profile saved', test: async()=>{ const {data}=await sb.from('profiles').select('id').eq('id',currentUser.id).maybeSingle(); return !!data; }},
-      { label: 'Session log', test: async()=>{ const {data}=await sb.from('sessions').select('id').eq('user_id',currentUser.id).limit(1); return Array.isArray(data); }},
-      { label: 'Analysis saved', test: async()=>{ const {data}=await sb.from('analysis').select('user_id').eq('user_id',currentUser.id).maybeSingle(); return !!data; }},
-      { label: 'Personal bests', test: async()=>{ const {data}=await sb.from('personal_bests').select('id').eq('user_id',currentUser.id).limit(1); return Array.isArray(data); }},
-    ];
-
-    const results = await Promise.all(checks.map(async ch => {
-      try { const ok = await ch.test(); return { label: ch.label, ok }; }
-      catch(e){ return { label: ch.label, ok: false }; }
-    }));
-
-    rows.innerHTML = results.map(r => `
-      <div class="db-status-row">
-        <span style="color:var(--txt2)">${r.label}</span>
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:10px;color:${r.ok?'var(--green)':'var(--red)'}">${r.ok?'OK':'Not found'}</span>
-          <span class="db-status-dot ${r.ok?'green':'amber'}"></span>
-        </div>
-      </div>`).join('') +
-      '<div style="font-size:10px;color:var(--txt3);margin-top:.625rem">User ID: ' + currentUser.id.slice(0,8) + '... · ' + currentUser.email + '</div>';
-  } catch(e){
-    rows.innerHTML = '<div class="db-status-row"><span style="color:var(--red)">Connection error: ' + e.message + '</span><span class="db-status-dot red"></span></div>';
-  }
-}
-
-
-// ── Global exports — direct assignment, no eval ──
-window.showAuthTab            = showAuthTab;
-window.doLogin                = doLogin;
-window.doSignup               = doSignup;
-window.doLogout               = doLogout;
-window.switchTab              = switchTab;
-window.runAnalysis            = runAnalysis;
-window.generatePlan           = generatePlan;
-window.toggleGoal             = toggleGoal;
-window.logSession             = logSession;
-window.selType                = selType;
-window.logPB                  = logPB;
-window.submitCheckin          = submitCheckin;
-window.ciSelect               = ciSelect;
-window.renderLogDashboard     = renderLogDashboard;
-window.sendChat               = sendChat;
-window.quickQ                 = quickQ;
-window.chatKeydown            = chatKeydown;
-window.autoGrow               = autoGrow;
-window.buildPacingPlan        = buildPacingPlan;
-window.analyseDoubles         = analyseDoubles;
-window.connectStrava          = connectStrava;
-window.disconnectStrava       = disconnectStrava;
-window.importStravaActivities = importStravaActivities;
-window.manualImport           = manualImport;
-window.saveApiKey             = saveApiKey;
-window.toggleApiKeyVis        = toggleApiKeyVis;
-window.toggleWeek             = toggleWeek;
-window.saveProfile            = saveProfile;
-window.handleAvatarUpload     = handleAvatarUpload;
-window.changePassword         = changePassword;
-window.refreshDbStatus        = refreshDbStatus;
-window.renderProfilePage      = renderProfilePage;
-</script>
-</body>
-</html>
 
 
 
